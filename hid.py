@@ -85,20 +85,21 @@ class CH374(threading.Thread):
         elif s & 0x01:
             s = self.Read374Byte(0x0A)
             if s & 0x0F == USB_INT['EP2_OUT']:
-                # if s & 0x10:
-                l = self.Read374Byte(0x0B)
-                buf = self.Read374Block(0xC0, l)
-                print('----------------------------')
-                print(buf)
-                self.Write374Block(0x40, buf)
-                self.Write374Byte(0x0B, l)
-                self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x40 | 0x00) ^ 0x80)
+                if s & 0x10:
+                    l = self.Read374Byte(0x0B)
+                    buf = self.Read374Block(0xC0, l)
+                    print('----------------------------')
+                    print(buf)
+                    self.Write374Block(0x40, buf)
+                    self.Write374Byte(0x0B, l)
+                    self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x40 | 0x00) ^ 0x80)
+
             elif s & 0x0F == USB_INT['EP2_IN']:
-                a = [0, 1, 2, 3, 4, 5, 6, 7]
-                self.Write374Block(0x40, a)
-                self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x40 | 0x02) ^ 0x40)
-            # elif s & 0x0F == USB_INT['EP1_IN']:
-            #     self.Write374Byte(0x0D, ((self.Read374Block(0x0D, 1)) & ~ 0x40 | 0x0E))
+
+                self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x40 | 0x00) ^ 0x40)
+                # a = [0, 1, 2, 3, 4, 5, 6, 7]
+                # self.Write374Block(0x40, a)
+                # self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x00) ^ 0x40)
             elif s & 0x0F == USB_INT['EP0_SETUP']:
                 l = self.Read374Byte(0x0B)
                 if l == 8:
@@ -376,3 +377,9 @@ def convert_str_to_ascii(lst):
             result.append(item)
     return result
 
+
+if __name__ == '__main__':
+    while True:
+        input("发送\r\n")
+        a = [0, 1, 2, 3, 4, 5, 6, 7]
+        CH374.Write374Block(0x40, a)
