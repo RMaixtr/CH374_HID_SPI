@@ -377,9 +377,3 @@ def convert_str_to_ascii(lst):
             result.append(item)
     return result
 
-
-if __name__ == '__main__':
-    while True:
-        input("发送\r\n")
-        a = [0, 1, 2, 3, 4, 5, 6, 7]
-        CH374.Write374Block(0x40, a)
