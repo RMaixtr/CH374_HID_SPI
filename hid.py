@@ -24,7 +24,8 @@ HIDRepDesc = [0x06, 0x00, 0xff, 0x09, 0x01, 0xa1, 0x01, 0x09, 0x02, 0x15, 0x00,
               0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x40, 0x91, 0x06, 0xC0]
 MyLangDescr = [0x04, 0x03, 0x09, 0x04]
 MyManuInfo = [0x0E, 0x03, 'C', 0, 'o', 0, 'c', 0, 'o', 0, 'p', 0, 'i', 0]
-MyProdInfo = [0x0C, 0x03, 'C', 0, 'H', 0, '3', 0, '7', 0, '4', 0]
+MyProdInfo = [0x0E, 0x03, 'C', 0, 'o', 0, 'c', 0, 'o', 0, 'p', 0, 'i',
+              0]  # [0x0C, 0x03, 'C', 0, 'H', 0, '3', 0, '7', 0, '4', 0]
 SetupReq = 0
 SetupLen = 0
 pDescr = 0
@@ -41,11 +42,21 @@ class CH374(threading.Thread):
         self.timeout = 1
         self.loopflag = True
         self.datacallback = []
-        self.statecallback = []
         self.sendendcallback = []
 
         self.slaverunflag = False
+        self.runthread = None
+        self.writeflag = False
 
+        self.getflag = False
+        self.getcontflag = False
+        self.getlen = 0
+        self.getcrc = b''
+        self.getcont = 0
+        self.zipfile = ''
+        self.socfile = ''
+
+        self.gettime = 0
         self.init()
 
     def __del__(self):
@@ -57,9 +68,9 @@ class CH374(threading.Thread):
         self.spi.close()
 
     def init(self, timeout=1):
-        self.spi.open(1, 0)  # 打开SPI设备（总线0，设备0）
-        self.spi.max_speed_hz = 500000  # 设置最大速度
-        self.spi.mode = 3  # 设置模式（0, 1, 2, 3）
+        self.spi.open(1, 0)
+        self.spi.max_speed_hz = 500000
+        self.spi.mode = 3
         self.Init374Device()
         self.timeout = timeout
 
@@ -86,25 +97,94 @@ class CH374(threading.Thread):
             s = self.Read374Byte(0x0A)
             if s & 0x0F == USB_INT['EP2_OUT']:
                 if s & 0x10:
-                    l = self.Read374Byte(0x0B)
-                    buf = self.Read374Block(0xC0, l)
-                    print('----------------------------')
-                    print(buf)
-                    self.Write374Block(0x40, buf)
-                    self.Write374Byte(0x0B, l)
-                    self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x40 | 0x00) ^ 0x80)
+                    buf = self.Read374Block(0xC0, 64)
+                    # print(buf)
+                    # and all(byte in b'0123456789abcdef' for byte in buf[buf[0]-7:buf[0]+1])
+                    if self.getflag and self.getcontflag:
+                        self.getcont += buf[0]
+                        with open(self.zipfile, "ab") as file:
+                            file.write(bytes(buf[1:buf[0] + 1]))
+                        if self.getcont == self.getlen and crc32_file(self.zipfile) == self.getcrc:
+                            self.getflag = False
+                            self.getcontflag = False
+                            self.write(b'\xff\xff' + int_to_bytes(self.getlen) + self.getcrc)
+                            self.getcont = 0
+                            decompress_file(self.zipfile, self.socfile)
+                            os.remove(self.zipfile)
+                            print(time.time() - self.gettime)
+                    elif buf[1] == 0xff and buf[2] == 0xff:
+                        bytes_buf = bytes(buf[1:buf[0] + 1])
+                        # print(bytes_buf)
+                        if self.getflag and not self.getcontflag:
+                            self.getcontflag = True
+                            if bytes_buf[2] == 0xf0:
+                                self.getcont = 0
+                                with open(self.zipfile, "wb") as file:
+                                    file.truncate(0)
+                            elif bytes_buf[2] == 0xff:
+                                self.getflag = False
+                                self.getcontflag = False
+                                self.getcont = 0
+                            if buf[0] > 3:
+                                self.getcont += buf[0] - 3
+                                with open(self.zipfile, "ab") as file:
+                                    file.write(bytes_buf[3:])
+                                if self.getcont == self.getlen and crc32_file(self.zipfile) == self.getcrc:
+                                    self.getflag = False
+                                    self.getcontflag = False
+                                    self.write(b'\xff\xff' + int_to_bytes(self.getlen) + self.getcrc)
+                                    self.getcont = 0
+                                    decompress_file(self.zipfile, self.socfile)
+                                    os.remove(self.zipfile)
+                                    print(time.time() - self.gettime)
+                        
+                        elif bytes_buf[2] == b'\x10':
+                            runfile = buf[3:buf[0] + 1]
+                            if not self.slaverunflag:
+                                self.runthread = threading.Thread(target=self.run_file, args=(runfile,))
+                                self.slaverunflag = True
+                                self.runthread.start()
+                            else:
+                                self.stop_thread(self.runthread)
+                                self.runthread = threading.Thread(target=self.run_file, args=(runfile,))
+                                self.runthread.start()
+                        elif bytes_buf[2] == b'\x11':
+                            if self.slaverunflag:
+                                self.stop_thread(self.runthread)
+                                self.slaverunflag = False
+                            self.write(b'\xff\xff\x1f')
+                            sys.stdout = sys.__stdout__
+                        elif bytes_buf[2] == b'\xff':
+                            self.getflag = False
+                            self.getcontflag = False
+                            self.getcont = 0
+                        elif buf[0] > 16 and not self.getflag:
+                            self.parse_file_transfer(bytes_buf)
+                    else:
+                        if self.datacallback:
+                            for call in self.datacallback:
+                                call(self, data)
+                    self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x00) ^ 0x80)  # 0x30
 
             elif s & 0x0F == USB_INT['EP2_IN']:
-
-                self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x40 | 0x00) ^ 0x40)
+                
+                if self.writeflag:
+                    print('in')
+                    self.writeflag = False
+                    self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x00) ^ 0x40)
+                    
+                else:
+                    self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x02) ^ 0x40)
                 # a = [0, 1, 2, 3, 4, 5, 6, 7]
                 # self.Write374Block(0x40, a)
+                # self.Write374Byte(0x0B, 64)
                 # self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x00) ^ 0x40)
+
             elif s & 0x0F == USB_INT['EP0_SETUP']:
                 l = self.Read374Byte(0x0B)
                 if l == 8:
                     SetupReqBuf = self.Read374Block(0x28, l)
-                    print([0] + SetupReqBuf)
+                    # print([0] + SetupReqBuf)
                     SetupLen = SetupReqBuf[-2]
                     if SetupReqBuf[-1] or SetupLen > 0x7F:
                         SetupLen = 0x7F
@@ -229,23 +309,56 @@ class CH374(threading.Thread):
         else:
             self.Write374Byte(0x09, 0x10 | 0x0F)
 
+    def parse_file_transfer(self, data):
+        self.getflag = True
+        self.getcrc = data[-8:]
+        self.getlen = bytes_to_int(data[-14:-8])
+        self.getcont = 0
+        self.zipfile = os.path.join(os.getcwd(), 'bletemp',
+                                    os.path.basename((data[2:-14] + b'.zip').decode('utf-8')))
+        self.socfile = os.path.dirname(os.path.abspath(data[2:-14].decode('utf-8')))
+        self.gettime = time.time()
+        if os.path.exists(self.zipfile):
+            with open(self.zipfile, 'rb') as file:
+                filedata = file.read()
+            cmpcrc = crc32(filedata)
+            if self.getlen == len(filedata) and self.getcrc == cmpcrc:
+                self.write(b'\xff\xff' + data[-14:])
+            elif self.getlen > len(filedata) > 0:
+                redata = b'\xff\xff' + int_to_bytes(len(filedata)) + cmpcrc
+                self.write(redata)
+                self.getcont = len(filedata)
+            else:
+                self.write(b'\xff\xff00000000000000')
+                self.getcont = 0
+        else:
+            if not os.path.exists(os.path.dirname(self.zipfile)):
+                os.makedirs(os.path.dirname(self.zipfile))
+            self.write(b'\xff\xff00000000000000')
+            self.getcont = 0
+
+    def write(self, lis):
+        if self.writeflag:
+            return False
+        else:
+            lis = list(lis)
+            lis += [0] * (64 - len(lis))
+            self.Write374Block(0x40, lis)
+            self.Write374Byte(0x0B, 64)
+            self.writeflag = True
+            return True
+
     def get_state(self):
         return self.state
 
     def add_data_callback(self, function):
         self.datacallback.append(function)
 
-    def add_state_callback(self, function):
-        self.statecallback.append(function)
-
     def add_sendend_callback(self, function):
         self.sendendcallback.append(function)
 
     def del_data_callback(self, function=None):
         self.datacallback.remove(function) if function else self.datacallback.pop()
-
-    def del_state_callback(self, function=None):
-        self.statecallback.remove(function) if function else self.statecallback.pop()
 
     def del_sendend_callback(self, function=None):
         self.sendendcallback.remove(function) if function else self.sendendcallback.pop()
@@ -265,8 +378,6 @@ class CH374(threading.Thread):
 
     def Write374Block(self, mAddr, mList):
         mList = convert_str_to_ascii(mList)
-        if mAddr == 0x20 and mList:
-            print([1] + mList)
         lis = [mAddr, 0x80]
         lis.extend(mList)
         return self.spi.xfer2(lis)
@@ -376,4 +487,3 @@ def convert_str_to_ascii(lst):
         else:
             result.append(item)
     return result
-
