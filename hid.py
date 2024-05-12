@@ -8,6 +8,7 @@ import traceback
 import zlib
 import zipfile
 import spidev
+from maix import camera, display, image
 
 USB_INT = {'EP0_SETUP': 0x0C, 'EP0_OUT': 0x00, 'EP0_IN': 0x08, 'EP1_OUT': 0x01, 'EP1_IN': 0x09, 'EP2_OUT': 0x02,
            'EP2_IN': 0x0A}
@@ -114,7 +115,7 @@ class CH374(threading.Thread):
                             print(time.time() - self.gettime)
                     elif buf[1] == 0xff and buf[2] == 0xff:
                         bytes_buf = bytes(buf[1:buf[0] + 1])
-                        # print(bytes_buf)
+                        print(bytes_buf,bytes_buf[2])
                         if self.getflag and not self.getcontflag:
                             self.getcontflag = True
                             if bytes_buf[2] == 0xf0:
@@ -138,8 +139,9 @@ class CH374(threading.Thread):
                                     os.remove(self.zipfile)
                                     print(time.time() - self.gettime)
                         
-                        elif bytes_buf[2] == b'\x10':
-                            runfile = buf[3:buf[0] + 1]
+                        elif bytes_buf[2] == 0x10:
+                            runfile = bytes_buf[3:]
+                            print(runfile)
                             if not self.slaverunflag:
                                 self.runthread = threading.Thread(target=self.run_file, args=(runfile,))
                                 self.slaverunflag = True
@@ -148,13 +150,13 @@ class CH374(threading.Thread):
                                 self.stop_thread(self.runthread)
                                 self.runthread = threading.Thread(target=self.run_file, args=(runfile,))
                                 self.runthread.start()
-                        elif bytes_buf[2] == b'\x11':
+                        elif bytes_buf[2] == 0x11:
                             if self.slaverunflag:
                                 self.stop_thread(self.runthread)
                                 self.slaverunflag = False
                             self.write(b'\xff\xff\x1f')
                             sys.stdout = sys.__stdout__
-                        elif bytes_buf[2] == b'\xff':
+                        elif bytes_buf[2] == 0xff:
                             self.getflag = False
                             self.getcontflag = False
                             self.getcont = 0
@@ -164,21 +166,21 @@ class CH374(threading.Thread):
                         if self.datacallback:
                             for call in self.datacallback:
                                 call(self, data)
-                    self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x00) ^ 0x80)  # 0x30
+                    if self.writeflag:
+                        self.writeflag = False
+                        self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x00) ^ 0x80)  # 0x30
+                    else:
+                        self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x30 | 0x00) ^ 0x80)  # 0x30
 
             elif s & 0x0F == USB_INT['EP2_IN']:
                 
-                if self.writeflag:
-                    print('in')
-                    self.writeflag = False
-                    self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x00) ^ 0x40)
+                # if self.writeflag:
+                #     print('in')
+                #     self.writeflag = False
+                #     self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x00) ^ 0x40)
                     
-                else:
-                    self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x02) ^ 0x40)
-                # a = [0, 1, 2, 3, 4, 5, 6, 7]
-                # self.Write374Block(0x40, a)
-                # self.Write374Byte(0x0B, 64)
-                # self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x00) ^ 0x40)
+                # else:
+                self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x02) ^ 0x40)
 
             elif s & 0x0F == USB_INT['EP0_SETUP']:
                 l = self.Read374Byte(0x0B)
@@ -252,8 +254,10 @@ class CH374(threading.Thread):
                         elif SetupReq == 0x01:
                             if (SetupReqBuf[0] & 0x1F) == 0x02:
                                 if SetupReqBuf[4] == 0x82:
+                                    print('03')
                                     self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x02))
                                 elif SetupReqBuf[4] == 0x02:
+                                    print('30')
                                     self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x30 | 0x00))
                                 elif SetupReqBuf[4] == 0x81:
                                     self.Write374Byte(0x0D, ((self.Read374Byte(0x0D)) & ~ 0x0F | 0x0E))
@@ -397,9 +401,11 @@ class CH374(threading.Thread):
 
     def run_code(self, code):
         # sys.stdout = self
+        print('run')
         try:
             exec(code, globals(), globals())
         except Exception as e:
+            print(e)
             exc_type, exc_value, exc_traceback = sys.exc_info()
             trace = traceback.extract_tb(exc_traceback)
             _, lineno, _, _ = trace[-1]
@@ -487,3 +493,14 @@ def convert_str_to_ascii(lst):
         else:
             result.append(item)
     return result
+
+
+if __name__ == '__main__':
+    from maix import camera, display, image  # 引入python模块包
+
+    image.load_freetype("/root/preset/fonts/simhei.ttf")
+    hello_img = image.new(size=(320, 240), color=(0, 0, 0),
+                          mode="RGB")  # 创建一张黑色背景图
+    hello_img.draw_string(30, 115, "HID程序已启动！", scale=1.0, color=(255, 255, 255),
+                          thickness=1)  # 在黑色背景图上写下hello world
+    display.show(hello_img)  # 把这张图显示出来
