@@ -1347,7 +1347,7 @@ elif state == "體育用品識別":
             var array = new Uint8Array(10);
             window.crypto.getRandomValues(array);
             console.log(array);
-            // await device.sendReport(0, array);
+            await device.sendReport(0, array);
 
         };
 
