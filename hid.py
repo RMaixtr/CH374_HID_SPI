@@ -115,7 +115,6 @@ class CH374(threading.Thread):
                             print(time.time() - self.gettime)
                     elif buf[1] == 0xff and buf[2] == 0xff:
                         bytes_buf = bytes(buf[1:buf[0] + 1])
-                        print(bytes_buf,bytes_buf[2])
                         if self.getflag and not self.getcontflag:
                             self.getcontflag = True
                             if bytes_buf[2] == 0xf0:
@@ -141,7 +140,6 @@ class CH374(threading.Thread):
                         
                         elif bytes_buf[2] == 0x10:
                             runfile = bytes_buf[3:]
-                            print(runfile)
                             if not self.slaverunflag:
                                 self.runthread = threading.Thread(target=self.run_file, args=(runfile,))
                                 self.slaverunflag = True
@@ -186,7 +184,6 @@ class CH374(threading.Thread):
                 l = self.Read374Byte(0x0B)
                 if l == 8:
                     SetupReqBuf = self.Read374Block(0x28, l)
-                    # print([0] + SetupReqBuf)
                     SetupLen = SetupReqBuf[-2]
                     if SetupReqBuf[-1] or SetupLen > 0x7F:
                         SetupLen = 0x7F
@@ -254,10 +251,8 @@ class CH374(threading.Thread):
                         elif SetupReq == 0x01:
                             if (SetupReqBuf[0] & 0x1F) == 0x02:
                                 if SetupReqBuf[4] == 0x82:
-                                    print('03')
                                     self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x02))
                                 elif SetupReqBuf[4] == 0x02:
-                                    print('30')
                                     self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x30 | 0x00))
                                 elif SetupReqBuf[4] == 0x81:
                                     self.Write374Byte(0x0D, ((self.Read374Byte(0x0D)) & ~ 0x0F | 0x0E))
@@ -401,7 +396,6 @@ class CH374(threading.Thread):
 
     def run_code(self, code):
         # sys.stdout = self
-        print('run')
         try:
             exec(code, globals(), globals())
         except Exception as e:
