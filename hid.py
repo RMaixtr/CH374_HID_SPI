@@ -8,7 +8,6 @@ import traceback
 import zlib
 import zipfile
 import spidev
-from maix import camera, display, image
 
 USB_INT = {'EP0_SETUP': 0x0C, 'EP0_OUT': 0x00, 'EP0_IN': 0x08, 'EP1_OUT': 0x01, 'EP1_IN': 0x09, 'EP2_OUT': 0x02,
            'EP2_IN': 0x0A}
@@ -163,7 +162,7 @@ class CH374(threading.Thread):
                     else:
                         if self.datacallback:
                             for call in self.datacallback:
-                                call(self, data)
+                                call(self, buf)
                     if self.writeflag:
                         self.writeflag = False
                         self.Write374Byte(0x0E, ((self.Read374Byte(0x0E)) & ~ 0x03 | 0x00) ^ 0x80)  # 0x30
